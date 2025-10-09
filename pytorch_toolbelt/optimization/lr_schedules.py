@@ -2,10 +2,10 @@ import math
 import warnings
 import numpy as np
 from torch import nn
-from torch.optim.lr_scheduler import _LRScheduler, LambdaLR
 from torch.optim.optimizer import Optimizer
 from torch.optim.lr_scheduler import (
     _LRScheduler,
+    LambdaLR,
     ExponentialLR,
     CyclicLR,
     MultiStepLR,
@@ -80,7 +80,7 @@ class CosineAnnealingLRWithDecay(_LRScheduler):
         def compute_lr(base_lr):
             return (
                 self.eta_min
-                + (base_lr * self.gamma ** self.last_epoch - self.eta_min)
+                + (base_lr * self.gamma**self.last_epoch - self.eta_min)
                 * (1 + math.cos(math.pi * self.last_epoch / self.T_max))
                 / 2
             )
@@ -110,7 +110,7 @@ class CosineAnnealingWarmRestartsWithDecay(CosineAnnealingWarmRestarts):
 
         return [
             self.eta_min
-            + (base_lr * self.gamma ** self.last_epoch - self.eta_min)
+            + (base_lr * self.gamma**self.last_epoch - self.eta_min)
             * (1 + math.cos(math.pi * self.T_cur / self.T_i))
             / 2
             for base_lr in self.base_lrs
@@ -174,7 +174,7 @@ class GradualWarmupScheduler(_LRScheduler):
                 self.after_scheduler.step(metrics, epoch - self.total_epoch)
 
     def step(self, epoch=None, metrics=None):
-        if type(self.after_scheduler) != ReduceLROnPlateau:
+        if not isinstance(self.after_scheduler, ReduceLROnPlateau):
             if self.finished and self.after_scheduler:
                 if epoch is None:
                     self.after_scheduler.step(None)

@@ -1,17 +1,16 @@
 """Implementation of tile-based inference allowing to predict huge images that does not fit into GPU memory entirely
 in a sliding-window fashion and merging prediction mask back to full-resolution.
 """
+
+import dataclasses
 import math
-import typing
-from typing import List, Iterable, Tuple
+from typing import List, Iterable, Tuple, Union, Sequence
 
 import cv2
 import numpy as np
 import torch
 
-from pytorch_toolbelt.utils import pytorch_toolbelt_deprecated
-
-__all__ = ["ImageSlicer", "TileMerger", "CudaTileMerger", "compute_pyramid_patch_weight_loss"]
+__all__ = ["ImageSlicer", "TileMerger", "compute_pyramid_patch_weight_loss"]
 
 
 def compute_pyramid_patch_weight_loss(width: int, height: int) -> np.ndarray:
@@ -60,7 +59,7 @@ class ImageSlicer:
     Helper class to slice image into tiles and merge them back
     """
 
-    def __init__(self, image_shape, tile_size, tile_step=0, image_margin=0, weight="mean"):
+    def __init__(self, image_shape: Tuple[int, int], tile_size, tile_step=0, image_margin=0, weight="mean"):
         """
 
         :param image_shape: Shape of the source image (H, W)
@@ -72,14 +71,14 @@ class ImageSlicer:
         self.image_height = image_shape[0]
         self.image_width = image_shape[1]
 
-        if isinstance(tile_size, (np.ndarray, typing.Sequence)):
+        if isinstance(tile_size, (np.ndarray, Sequence)):
             if len(tile_size) != 2:
                 raise ValueError(f"Tile size must have exactly 2 elements. Got: tile_size={tile_size}")
             self.tile_size = int(tile_size[0]), int(tile_size[1])
         else:
             self.tile_size = int(tile_size), int(tile_size)
 
-        if isinstance(tile_step, (np.ndarray, typing.Sequence)):
+        if isinstance(tile_step, (np.ndarray, Sequence)):
             if len(tile_step) != 2:
                 raise ValueError(f"Tile size must have exactly 2 elements. Got: tile_step={tile_size}")
             self.tile_step = int(tile_step[0]), int(tile_step[1])
@@ -117,16 +116,10 @@ class ImageSlicer:
             self.margin_bottom = extra_h - self.margin_top
 
         else:
-            if isinstance(image_margin, typing.Sequence):
+            if isinstance(image_margin, Sequence):
                 margin_left, margin_right, margin_top, margin_bottom = image_margin
             else:
                 margin_left = margin_right = margin_top = margin_bottom = image_margin
-
-            if (self.image_width + margin_left + margin_right) % self.tile_size[1] != 0:
-                raise ValueError()
-
-            if (self.image_height + margin_top + margin_bottom) % self.tile_size[0] != 0:
-                raise ValueError()
 
             self.margin_left = margin_left
             self.margin_right = margin_right
@@ -334,16 +327,24 @@ class TileMerger:
         if len(batch) != len(crop_coords):
             raise ValueError("Number of images in batch does not correspond to number of coordinates")
 
-        batch = batch.to(device=self.image.device)
+        if batch.device != self.image.device:
+            batch = batch.to(device=self.image.device)
+
+        # Ensure that input batch dtype match the target dtyle of the accumulator
+        if batch.dtype != self.image.dtype:
+            batch = batch.type_as(self.image)
+
         for tile, (x, y, tile_width, tile_height) in zip(batch, crop_coords):
             self.image[:, y : y + tile_height, x : x + tile_width] += tile * self.weight
             self.norm_mask[:, y : y + tile_height, x : x + tile_width] += self.weight
 
+    @property
+    def device(self) -> torch.device:
+        return self.image.device
+
     def merge(self) -> torch.Tensor:
         return self.image / self.norm_mask
 
-
-@pytorch_toolbelt_deprecated("This class is deprecated and will be removed in 0.5.0. Please use TileMerger instead.")
-class CudaTileMerger(TileMerger):
-    def __init__(self, image_shape, channels, weight, device="cuda"):
-        super().__init__(image_shape, channels, weight, device)
+    def merge_(self) -> torch.Tensor:
+        self.image /= self.norm_mask
+        return self.image
